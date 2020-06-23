@@ -1466,6 +1466,10 @@ void  init_io(void) {
 	ok = kSuccess == FlutterEngineSendPointerEvent(engine, flutterevents, i_flutterevent);
 	if (!ok) fprintf(stderr, "error while sending initial mousepointer / multitouch slot information to flutter\n");
 }
+
+bool gB_firstTouch = false;
+int gI_touchID = -1;
+
 void  on_evdev_input(fd_set fds, size_t n_ready_fds) {
 	struct input_event    linuxevents[64];
 	size_t                n_linuxevents;
@@ -1474,6 +1478,7 @@ void  on_evdev_input(fd_set fds, size_t n_ready_fds) {
 	FlutterPointerEvent   flutterevents[64] = {0};
 	size_t                i_flutterevent = 0;
 	int    ok, i, j;
+	
 
 	while (n_ready_fds > 0) {
 		// find out which device got new data
@@ -1495,7 +1500,7 @@ void  on_evdev_input(fd_set fds, size_t n_ready_fds) {
 		}
 		n_ready_fds--;
 		n_linuxevents = ok / sizeof(struct input_event);
-		
+
 		// now go through all linux events and update the state and flutterevents array accordingly.
 		for (int i=0; i < n_linuxevents; i++) {
 			struct input_event *e = &linuxevents[i];
@@ -1515,12 +1520,11 @@ void  on_evdev_input(fd_set fds, size_t n_ready_fds) {
 					mousepointer.phase = device->active_buttons ? kMove : kHover;
 
 			} else if (e->type == EV_ABS) {
-
 				if (e->code == ABS_MT_SLOT) {
 
 					// select a new active mtslot.
-					device->i_active_mtslot = e->value;
-					active_mtslot = &device->mtslots[device->i_active_mtslot];
+					//device->i_active_mtslot = e->value;
+					//active_mtslot = &device->mtslots[device->i_active_mtslot];
 
 				} else if (e->code == ABS_MT_POSITION_X || e->code == ABS_X || e->code == ABS_MT_POSITION_Y || e->code == ABS_Y) {
 					double relx = 0, rely = 0;
@@ -1553,13 +1557,23 @@ void  on_evdev_input(fd_set fds, size_t n_ready_fds) {
 					// id -1 means no id, or no touch. one tracking id is equivalent one continuous touch contact.
 					bool before = device->active_buttons && true;
 
+					
+
 					if (active_mtslot->id == -1) {
-						active_mtslot->id = e->value;
-						// only set active_buttons if a touch equals a kMove (not kHover, as it is for multitouch touchpads)
-						device->active_buttons |= (device->is_direct ? FLUTTER_BUTTON_FROM_EVENT_CODE(BTN_TOUCH) : 0);
+						if(!gB_firstTouch){
+							active_mtslot->id = e->value;
+							// only set active_buttons if a touch equals a kMove (not kHover, as it is for multitouch touchpads)
+							device->active_buttons |= (device->is_direct ? FLUTTER_BUTTON_FROM_EVENT_CODE(BTN_TOUCH) : 0);
+							gB_firstTouch = true;
+							gI_touchID = e->value;
+						}
 					} else {
-						active_mtslot->id = -1;
-						device->active_buttons &= ~(device->is_direct ? FLUTTER_BUTTON_FROM_EVENT_CODE(BTN_TOUCH) : 0);
+						if(gI_touchID == active_mtslot->id){
+							active_mtslot->id = -1;
+							device->active_buttons &= ~(device->is_direct ? FLUTTER_BUTTON_FROM_EVENT_CODE(BTN_TOUCH) : 0);
+							gB_firstTouch = false;
+							gI_touchID = -1;
+						}
 					}
 
 					if (!before != !device->active_buttons)
